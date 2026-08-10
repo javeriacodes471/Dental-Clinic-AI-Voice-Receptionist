@@ -1,0 +1,726 @@
+{
+  "name": "Dental Clinic Voice Agent - Booking Backend",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vapi-tools",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "635c04c3-1a5f-410a-9212-7a45a7788bac",
+      "name": "Webhook",
+      "webhookId": "afe925e1-35da-4ea5-8edf-1c349e52c11f",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fNk8R6JinACsfVhs",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const toolCalls = $input.first().json.body.message.toolCalls;\n\nif (!toolCalls || toolCalls.length === 0) {\n  throw new Error('No toolCalls found in payload');\n}\n\nreturn toolCalls.map(tc => ({\n  json: {\n    toolCallId: tc.id,\n    functionName: tc.function.name,\n    args: tc.function.arguments\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        0
+      ],
+      "id": "3fbd8cc2-9b90-432e-94d9-f7f88e38a900",
+      "name": "Extract Tool Calls"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.functionName }}",
+                    "rightValue": "check_availability",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "c6ac6dbe-2cc0-4646-b33a-07a2b80e1191"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "106846be-0d25-4463-95dc-f6a3ef0aebf0",
+                    "leftValue": "={{ $json.functionName }}",
+                    "rightValue": "book_appointment",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "445d39a5-60ec-4e40-8471-923acdc1810a",
+                    "leftValue": "={{ $json.functionName }}",
+                    "rightValue": "cancel_appointment",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "07bc4bb4-2ee8-4e06-baa8-49cf067e6a2f",
+                    "leftValue": "={{ $json.functionName }}",
+                    "rightValue": "get_faq",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        336,
+        -32
+      ],
+      "id": "f54cb283-547a-45d0-a093-a10c109adab9",
+      "name": "Route by Function"
+    },
+    {
+      "parameters": {
+        "jsCode": "const busySlots = $input.first().json;\nconst requestedDate = $('Extract Tool Calls').first().json.args.date;\nconst toolCallId = $('Extract Tool Calls').first().json.toolCallId;\n\nconst checkDateObj = DateTime.fromISO(requestedDate, { zone: 'Asia/Karachi' });\nif (checkDateObj.weekday === 7) { // Luxon: 7 = Sunday\n  return [{\n    json: { toolCallId, result: \"We're closed on Sundays. Could you choose a day between Monday and Saturday?\" }\n  }];\n}\n\nconst clinicStart = 11;\nconst clinicEnd = 20;\nconst slotMins = 30;\n\nconst busy = (Array.isArray(busySlots) ? busySlots : []).map(b => ({\n  start: DateTime.fromISO(b.start),\n  end: DateTime.fromISO(b.end)\n}));\n\nconst freeSlots = [];\nlet cursor = DateTime.fromISO(requestedDate, { zone: 'Asia/Karachi' }).set({ hour: clinicStart, minute: 0, second: 0 });\nconst dayEnd = DateTime.fromISO(requestedDate, { zone: 'Asia/Karachi' }).set({ hour: clinicEnd, minute: 0, second: 0 });\n\nwhile (cursor < dayEnd) {\n  const slotEnd = cursor.plus({ minutes: slotMins });\n  const overlaps = busy.some(b => cursor < b.end && slotEnd > b.start);\n  if (!overlaps) {\n    freeSlots.push(cursor.setZone('Asia/Karachi').toFormat('h:mm a'));\n  }\n  cursor = slotEnd;\n}\n\nreturn [{\n  json: {\n    toolCallId,\n    result: freeSlots.length\n      ? `Available slots on ${requestedDate}: ${freeSlots.slice(0, 5).join(', ')}`\n      : `Sorry, no slots available on ${requestedDate}. Would you like a different date?`\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        -272
+      ],
+      "id": "a5372917-de26-42de-9bfe-baf16ef22556",
+      "name": "format availaibility"
+    },
+    {
+      "parameters": {
+        "jsCode": "const args = $('Extract Tool Calls').first().json.args;\nconst toolCallId = $('Extract Tool Calls').first().json.toolCallId;\n\nreturn [{\n  json: {\n    toolCallId,\n    result: `Confirmed! Your ${args.service} appointment is booked on ${args.date} at ${args.time}.`\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        -144
+      ],
+      "id": "ca9ff0f6-dfe8-4800-9eca-96cd3eaf0941",
+      "name": "Format Booking Confirmation"
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $json.args.question.toLowerCase();\nconst toolCallId = $json.toolCallId;\n\nconst faqs = {\n  hours: \"We're open Monday to Saturday, 9 AM to 6 PM.\",\n  insurance: \"We accept most major insurance providers. Please bring your card.\",\n  services: \"We offer cleanings, fillings, root canals, and cosmetic dentistry.\",\n  location: \"We're located at [your demo clinic address].\"\n};\n\nlet answer = \"I don't have that information right now, but our staff can help you when you visit.\";\nfor (const key in faqs) {\n  if (query.includes(key)) { answer = faqs[key]; break; }\n}\n\nreturn [{ json: { toolCallId, result: answer } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        528,
+        400
+      ],
+      "id": "f35fd2b5-e558-4972-a780-90198d84f25e",
+      "name": "FAQ Lookup"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "2839d81aee50118344f026a727bbd726a4085e6ce5238d70701e70c044a85952@group.calendar.google.com",
+          "mode": "list",
+          "cachedResultName": "Dental Clinic Bookings"
+        },
+        "start": "={{ DateTime.fromISO($json.args.date + 'T' + $json.args.time + ':00', { zone: 'Asia/Karachi' }).toISO() }}",
+        "end": "={{ DateTime.fromISO($json.args.date + 'T' + $json.args.time + ':00', { zone: 'Asia/Karachi' }).plus({ minutes: 30 }).toISO() }}",
+        "additionalFields": {
+          "description": "Booked via Voice Agent",
+          "summary": "={{ $json.args.service }} - {{ $json.args.patient_name }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1072,
+        -96
+      ],
+      "id": "ed04f767-b825-445b-bdbd-b533a203311d",
+      "name": "book appointemnet",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "eDsh7sebGtb2iHHX",
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "calendar",
+        "calendar": {
+          "__rl": true,
+          "value": "2839d81aee50118344f026a727bbd726a4085e6ce5238d70701e70c044a85952@group.calendar.google.com",
+          "mode": "list",
+          "cachedResultName": "Dental Clinic Bookings"
+        },
+        "timeMin": "=\n{{ $json.args.date }}T00:00:00+05:00",
+        "timeMax": "={{ $json.args.date }}T23:59:59+05:00",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        720,
+        -384
+      ],
+      "id": "d52d9376-8076-412b-a0a2-a13af8a1520f",
+      "name": "check availability",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "eDsh7sebGtb2iHHX",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "2839d81aee50118344f026a727bbd726a4085e6ce5238d70701e70c044a85952@group.calendar.google.com",
+          "mode": "list",
+          "cachedResultName": "Dental Clinic Bookings"
+        },
+        "timeMin": "={{ $json.args.date }}T00:00:00+05:00",
+        "timeMax": "={{ $json.args.date }}T23:59:59+05:00",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        544,
+        176
+      ],
+      "id": "8d04c30f-1394-4aa2-a484-ef18b88056fd",
+      "name": "cancel_appointment",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "eDsh7sebGtb2iHHX",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const events = $input.all().map(i => i.json);\nconst args = $('Extract Tool Calls').first().json.args;\nconst toolCallId = $('Extract Tool Calls').first().json.toolCallId;\n\nconst match = events.find(e => \n  e.summary && e.summary.toLowerCase().includes(args.name.toLowerCase())\n);\n\nif (!match) {\n  return [{\n    json: {\n      toolCallId,\n      result: `I couldn't find an appointment under that name on ${args.date}.`,\n      eventFound: false\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    toolCallId,\n    eventId: match.id,\n    eventFound: true\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        176
+      ],
+      "id": "f92dab46-f20e-4a0d-9b08-5a0d93626af2",
+      "name": "Find Matching Event"
+    },
+    {
+      "parameters": {
+        "jsCode": "const toolCallId = $('Extract Tool Calls').first().json.toolCallId;\nconst customMessage = $json.error?.message;\n\nreturn [{\n  json: {\n    toolCallId,\n    result: customMessage || \"I'm having trouble booking that slot. Our staff will call you back shortly.\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        32
+      ],
+      "id": "2f75dea4-d818-415b-b1c2-df7155d4965c",
+      "name": "Booking Error Fallback"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5ad89b24-f835-4458-ab21-1a90d992ec71",
+              "leftValue": "= {{ $json.eventFound }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1216,
+        176
+      ],
+      "id": "fa752190-06a6-465a-b3a9-45b07ce780df",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "calendar": {
+          "__rl": true,
+          "value": "2839d81aee50118344f026a727bbd726a4085e6ce5238d70701e70c044a85952@group.calendar.google.com",
+          "mode": "list",
+          "cachedResultName": "Dental Clinic Bookings"
+        },
+        "eventId": "={{ $json.eventId }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1888,
+        96
+      ],
+      "id": "855f4d05-6eff-4758-8bb7-634041a8a1ff",
+      "name": "Delete an event",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "eDsh7sebGtb2iHHX",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { toolCallId: $json.toolCallId, result: \"Your appointment has been cancelled.\" } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2064,
+        96
+      ],
+      "id": "018cb70b-986f-463a-ac93-a59cc0858b8a",
+      "name": "Cancel Confirmation"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2352,
+        -32
+      ],
+      "id": "14d60f79-d9bd-4c9e-a5ec-1def5d48a603",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allResults = $input.all().map(item => ({ toolCallId: item.json.toolCallId, result: item.json.result }));\nreturn [{ json: { results: allResults } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2576,
+        -32
+      ],
+      "id": "bf36012c-ed6c-4514-aac4-0d8caa2f5d8a",
+      "name": "aggregate response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2800,
+        -32
+      ],
+      "id": "41cd4ab3-9745-43fc-afc8-d7b0dd75795b",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const args = $json.args;\nconst toolCallId = $json.toolCallId;\n\nconst requestedHour = parseInt(args.time.split(':')[0]);\nconst clinicOpen = 11;\nconst clinicClose = 20;\n\nif (isNaN(requestedHour) || requestedHour < clinicOpen || requestedHour >= clinicClose) {\n  throw new Error(\"We're open 11 AM to 8 PM, Monday to Saturday. Could you pick a time within those hours?\");\n}\n\nconst requestedDateObj = new Date(args.date + 'T00:00:00+05:00');\nif (requestedDateObj.getDay() === 0) {\n  throw new Error(\"We're closed on Sundays. Could you choose a day between Monday and Saturday?\");\n}\n\nreturn [{ json: { toolCallId, args } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        -32
+      ],
+      "id": "3116e4cd-d115-47f0-aeac-538d9c4a72a4",
+      "name": "validate timing",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const args = $json.args;\nconst toolCallId = $json.toolCallId;\nconst rawDate = args.date;\n\nfunction parseDate(input) {\n  if (!input) return null;\n  input = String(input).trim();\n\n  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(input)) return input;\n\n  let m = input.match(/^(\\d{1,2})[\\/\\-](\\d{1,2})[\\/\\-](\\d{4})$/);\n  if (m) {\n    const day = m[1].padStart(2, '0');\n    const month = m[2].padStart(2, '0');\n    return `${m[3]}-${month}-${day}`;\n  }\n\n  const parsed = new Date(input);\n  if (!isNaN(parsed.getTime())) {\n    const y = parsed.getFullYear();\n    const mo = String(parsed.getMonth() + 1).padStart(2, '0');\n    const d = String(parsed.getDate()).padStart(2, '0');\n    return `${y}-${mo}-${d}`;\n  }\n  return null;\n}\n\nconst cleanDate = parseDate(rawDate);\n\nif (!cleanDate) {\n  throw new Error(\"I didn't catch the date clearly. Could you say it like 'August 16th'?\");\n}\n\nreturn [{ json: { toolCallId, args: { ...args, date: cleanDate } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        -208
+      ],
+      "id": "d70eaa06-42d9-41d2-a9fb-bbd426864309",
+      "name": "normlaize date",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const toolCallId = $('Extract Tool Calls').first().json.toolCallId;\nreturn [{ json: { toolCallId, result: $json.error?.message || \"Could you repeat that date, please?\" } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        -160
+      ],
+      "id": "849a84c8-e4d2-454a-befb-90006738d697",
+      "name": "date error"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Tool Calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Tool Calls": {
+      "main": [
+        [
+          {
+            "node": "Route by Function",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Function": {
+      "main": [
+        [
+          {
+            "node": "normlaize date",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "validate timing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "cancel_appointment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "FAQ Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "book appointemnet": {
+      "main": [
+        [
+          {
+            "node": "Format Booking Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Booking Error Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check availability": {
+      "main": [
+        [
+          {
+            "node": "format availaibility",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "cancel_appointment": {
+      "main": [
+        [
+          {
+            "node": "Find Matching Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Matching Event": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Delete an event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Delete an event": {
+      "main": [
+        [
+          {
+            "node": "Cancel Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "format availaibility": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Booking Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Booking Error Fallback": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Cancel Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "FAQ Lookup": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "aggregate response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "aggregate response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validate timing": {
+      "main": [
+        [
+          {
+            "node": "book appointemnet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Booking Error Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "normlaize date": {
+      "main": [
+        [
+          {
+            "node": "check availability",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "date error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "4b51f443-f393-4ea3-9e53-2930e2d3f8fb",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c6e8d195673bf6200ac90049f00db17fc2711da53b94cc275abc111cc93e28ea"
+  },
+  "nodeGroups": [],
+  "id": "QUoKPFRU3Nkf3EFJ",
+  "tags": []
+}
