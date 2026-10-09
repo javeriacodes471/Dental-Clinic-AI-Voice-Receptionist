@@ -43,7 +43,7 @@ Caller (phone or browser mic)
 - **System-prompt-enforced booking sequence** — the model was initially skipping the caller's name before booking. Rather than trying to catch this downstream, the fix was upstream: an explicit numbered sequence in the system prompt ("you MUST ask for the caller's name before calling book_appointment") — because a required field in the tool schema alone doesn't force the model to *ask* for it, only to include it if it has it.
 - **Case-insensitive, date-scoped matching for cancellations** — matching a spoken name against a calendar event title by exact string comparison fails constantly (case, partial names, extra words). Matching is scoped by name substring **and** date together to avoid cancelling the wrong appointment.
 
-## Problems solved during build (worth knowing for the interview)
+## Problems solved during build
 
 1. **Silent 403s on every tool call.** The n8n webhook had Header Auth enabled but Vapi's tools had no matching header configured — requests were reaching n8n and being rejected before they ever ran. Fixed by adding a shared secret header to all four Vapi tools.
 2. **Web SDK never loaded in the browser.** `@vapi-ai/web` is a bundler-only package — including it via a plain `<script src>` tag never actually defines `window.Vapi`, regardless of connection speed. Switched to Vapi's dedicated `html-script-tag` SDK, which is built for exactly this integration path.
